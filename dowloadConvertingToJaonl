@@ -1,0 +1,92 @@
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+import time
+import os
+import requests
+import json
+
+# Ustawienia
+base_url = "https://www.sn.pl/wyszukiwanie/SitePages/orzeczenia.aspx"
+output_folder = "orzeczenia_SN"
+jsonl_file = "orzeczenia_SN/orzeczenia.jsonl"
+
+# Tworzenie folderu na orzeczenia
+os.makedirs(output_folder, exist_ok=True)
+
+# Inicjalizacja przeglądarki
+options = webdriver.ChromeOptions()
+options.add_argument('--headless')
+options.add_argument('--disable-gpu')
+options.add_argument('--no-sandbox')
+options.add_argument('--disable-dev-shm-usage')
+
+# Uruchamiamy przeglądarkę
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+# Otwieramy stronę SN
+driver.get(base_url)
+time.sleep(5)
+
+# Znalezienie pola wyszukiwania
+try:
+    search_box = driver.find_element(By.XPATH, "//input[contains(@id, 'Sygnatura')]")
+    search_box.clear()
+    search_box.send_keys(Keys.RETURN)
+    time.sleep(5)
+except Exception as e:
+    print(f"Nie udało się znaleźć pola wyszukiwania: {e}")
+    driver.quit()
+    exit()
+
+# Otwieramy plik JSONL
+with open(jsonl_file, 'w', encoding='utf-8') as jsonl:
+    page = 1
+    while True:
+        print(f"Pobieranie strony {page}...")
+
+        # Zbieramy linki do plików HTML
+        links = driver.find_elements(By.XPATH, "//a[contains(@href, '.html')]")
+
+        if not links:
+            print("Nie znaleziono więcej orzeczeń!")
+            break
+
+        # Pobieramy pliki z tej strony
+        for link in links:
+            file_url = link.get_attribute('href')
+            file_name = file_url.split('/')[-1]
+            file_path = os.path.join(output_folder, file_name)
+
+            print(f"Pobieranie: {file_url}")
+            response = requests.get(file_url)
+            content = response.text
+
+            # Zapis pliku HTML
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            # Zapis do pliku JSONL
+            data = {
+                "url": file_url,
+                "file_name": file_name,
+                "content": content
+            }
+            jsonl.write(json.dumps(data, ensure_ascii=False) + "\n")
+
+        # Przechodzimy do następnej strony
+        try:
+            next_button = driver.find_element(By.XPATH, "//a[contains(text(),'następna')]")
+            next_button.click()
+            time.sleep(5)
+            page += 1
+        except:
+            print("Brak kolejnej strony. Koniec!")
+            break
+
+# Zamykamy przeglądarkę
+driver.quit()
+
+print("Pobieranie całej bazy zakończone!")
